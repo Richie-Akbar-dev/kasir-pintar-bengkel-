@@ -1,0 +1,168 @@
+@import 'tailwindcss';
+
+@theme {
+  --font-sans: 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: 'Consolas', 'SF Mono', ui-monospace, monospace;
+
+  /* Warna utama: biru baja + aksen oranye (nuansa bengkel) */
+  --color-brand-50: #eef4ff;
+  --color-brand-100: #d9e5ff;
+  --color-brand-200: #bcd1ff;
+  --color-brand-300: #8eb2ff;
+  --color-brand-400: #5988ff;
+  --color-brand-500: #3361f6;
+  --color-brand-600: #1f42eb;
+  --color-brand-700: #1a33d8;
+  --color-brand-800: #1b2dae;
+  --color-brand-900: #1b2c89;
+  --color-brand-950: #151d52;
+
+  --color-accent-50: #fff8ed;
+  --color-accent-100: #ffefd4;
+  --color-accent-200: #ffdba8;
+  --color-accent-300: #ffc06f;
+  --color-accent-400: #ff9a38;
+  --color-accent-500: #fb7c14;
+  --color-accent-600: #ec6009;
+  --color-accent-700: #c3470b;
+  --color-accent-800: #9a3911;
+  --color-accent-900: #7c3110;
+}
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  background: #f1f5f9;
+  color: #0f172a;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---------------------------------- scrollbar --------------------------------- */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+  background-clip: content-box;
+}
+
+/* ------------------------------- angka tabular ------------------------------- */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------------------------------- animasi ---------------------------------- */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.animate-fade-in {
+  animation: fadeIn 0.18s ease-out;
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.animate-slide-up {
+  animation: slideUp 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ----------------------------------- CETAK ----------------------------------- */
+@media print {
+  body {
+    background: #fff;
+  }
+  /* Sembunyikan seluruh aplikasi, lalu tampilkan hanya area struk. */
+  body * {
+    visibility: hidden !important;
+    box-shadow: none !important;
+  }
+  .print-area,
+  .print-area * {
+    visibility: visible !important;
+  }
+  .print-area {
+    position: absolute !important;
+    left: 0;
+    top: 0;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #fff !important;
+    color: #000 !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+  @page {
+    margin: 0;
+  }
+}
+.print-only {
+  display: none;
+}
+
+/* Kertas struk: 58mm atau 80mm */
+.receipt {
+  font-family: 'Consolas', 'Courier New', ui-monospace, monospace;
+  color: #000;
+  background: #fff;
+}
+.receipt-58 {
+  width: 58mm;
+  padding: 2mm;
+  font-size: 10.5px;
+  line-height: 1.35;
+}
+.receipt-80 {
+  width: 80mm;
+  padding: 3mm;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.receipt hr {
+  border: none;
+  border-top: 1px dashed #000;
+  margin: 3px 0;
+}
+.receipt table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.receipt .row {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+}
