@@ -71,10 +71,57 @@ walau internet sedang mati.
 
 ## 🚀 Cara menjalankan (Windows)
 
-1. **Pasang Node.js** (versi LTS) dari [nodejs.org](https://nodejs.org).
-2. **Jalankan `install.bat`** — cukup sekali, untuk mengunduh dependency & membuat data contoh.
-3. **Dobel-klik `start.bat`** setiap kali ingin memakai aplikasi.
-4. Browser akan terbuka ke `http://localhost:3001`.
+### 1. Pasang Node.js
+
+Unduh versi **LTS** di [nodejs.org](https://nodejs.org), lalu jalankan penginstalnya.
+Setelah selesai, **tutup dan buka kembali jendela CMD** agar PATH-nya terbaca.
+
+Cek dengan perintah berikut — harus muncul nomor versi (minimal `v18`):
+
+```bat
+node -v
+npm -v
+```
+
+### 2. Ambil kode aplikasi
+
+Kode berada di **cabang `arena/4405f452-kasir-pintar-bengkel`** (cabang `main` masih kosong).
+
+**Cara A — lewat Git** (jalankan di CMD):
+
+```bat
+git clone https://github.com/Richie-Akbar-dev/kasir-pintar-bengkel-.git
+cd kasir-pintar-bengkel-
+git checkout arena/4405f452-kasir-pintar-bengkel
+```
+
+**Cara B — tanpa Git:** unduh ZIP cabang ini, lalu ekstrak:
+
+```
+https://github.com/Richie-Akbar-dev/kasir-pintar-bengkel-/archive/refs/heads/arena/4405f452-kasir-pintar-bengkel.zip
+```
+
+### 3. Instalasi (cukup sekali)
+
+```bat
+install.bat
+```
+
+Skrip ini akan mengunduh dependency, membangun antarmuka, dan membuat data contoh.
+Tunggu sampai muncul **"INSTALASI SELESAI"**.
+
+### 4. Menjalankan aplikasi
+
+Setiap kali ingin memakai:
+
+```bat
+start.bat
+```
+
+Browser akan terbuka otomatis ke `http://localhost:3001`.
+
+> ⚠️ **Jangan tutup jendela CMD selama aplikasi dipakai.**
+> Menutupnya akan menghentikan server. Untuk berhenti dengan rapi, tekan **Ctrl+C**.
 
 ### Akun bawaan
 
