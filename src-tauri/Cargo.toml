@@ -1,0 +1,21 @@
+[package]
+name = "kasir-pintar-bengkel"
+version = "1.0.0"
+description = "Kasir Pintar Bengkel - Aplikasi Kasir Bengkel Motor"
+edition = "2021"
+rust-version = "1.77.2"
+
+# Kompilasi Windows memakai MSVC (link.exe dari Visual Studio Build Tools)
+# Aturan main.rs: menjalankan server Node.js (bundel) lalu membuka jendela aplikasi.
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[features]
+# Fitur standar Tauri - jangan dihapus (dipakai saat build produksi)
+custom-protocol = ["tauri/custom-protocol"]

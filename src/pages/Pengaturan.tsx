@@ -485,6 +485,13 @@ function UsersTab() {
 
 /* ============================== Data ============================== */
 
+function isTauriApp() {
+  return (
+    typeof window !== 'undefined' &&
+    !!((window as any).__TAURI_INTERNALS__ || (window as any).__TAURI__)
+  );
+}
+
 function DataTab() {
   const toast = useToast();
   const { data, loading, reload } = useApi<{
@@ -527,6 +534,15 @@ function DataTab() {
     }
   }
 
+  async function openDataFolder() {
+    try {
+      const invoke = (window as any).__TAURI__?.core?.invoke;
+      if (invoke) await invoke('open_data_folder');
+    } catch (err) {
+      toast.push(err instanceof Error ? err.message : 'Gagal membuka folder data.', 'error');
+    }
+  }
+
   return (
     <>
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
@@ -541,6 +557,15 @@ function DataTab() {
                   {data?.info.dir}
                 </p>
               </div>
+              {isTauriApp() && (
+                <button
+                  type="button"
+                  onClick={openDataFolder}
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-[13px] font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  📂 Buka folder data
+                </button>
+              )}
               <div className="flex items-center justify-between text-[13px]">
                 <span className="text-slate-500">Total ukuran</span>
                 <span className="font-medium tabular">

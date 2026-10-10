@@ -36,8 +36,14 @@ echo   Server berjalan di http://localhost:3001
 echo   Tekan CTRL+C pada jendela ini untuk menghentikan aplikasi.
 echo.
 
-REM --- Buka browser ---
-start "" http://localhost:3001
+REM --- Buka jendela aplikasi (mode aplikasi: tanpa tab & kolom alamat) ---
+set "EDGE=%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe"
+if not exist "%EDGE%" set "EDGE=%ProgramFiles%\Microsoft\Edge\Application\msedge.exe"
+if exist "%EDGE%" (
+  start "" "%EDGE%" --app=http://localhost:3001
+) else (
+  start "" http://localhost:3001
+)
 
 set NODE_ENV=production
 node server\index.js

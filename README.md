@@ -251,6 +251,25 @@ salinan, dan potong kertas otomatis.
 
 ---
 
+## 🖥️ Mode aplikasi desktop (.exe)
+
+Aplikasi ini bisa dijadikan **program Windows (.exe)** yang terbuka langsung di layar
+seperti aplikasi biasa — **tanpa browser, tanpa CMD** — memakai **Tauri v2 + Node.js sidecar**.
+
+- Semua kode pembungkus desktop ada di folder `src-tauri/`
+- Satu-satunya proses yang dibutuhkan: menjalankan **`build-windows.bat`**
+  di PC ber-Windows (perlu hak **Administrator**, sekali jalan saja)
+- Hasilnya: `Keluaran\Kasir Pintar Bengkel_1.0.0_x64-setup.exe` — tinggal dipasang di laptop
+- Data tersimpan di `%APPDATA%\kasir-pintar-bengkel\data`
+  (ada tombol **Buka folder data** di Pengaturan → Data & Backup)
+
+**Langkah lengkapnya: lihat `PANDUAN-BUILD.md`.**
+
+> Catatan: menjalankan `.exe` tidak membutuhkan Rust maupun Node.js —
+> keduanya hanya diperlukan saat *membuat* installer (bisa dilakukan di warnet).
+
+---
+
 ## 🗺️ Rencana pengembangan
 
 - [ ] Kemasan aplikasi desktop (Electron) sehingga tidak perlu membuka browser
