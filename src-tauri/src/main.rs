@@ -90,6 +90,30 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![open_data_folder])
         .setup(|app| {
+            // ---------- Mode pengembangan: `npm run app` (tauri dev) ----------
+            // Server & tampilan dijalankan oleh beforeDevCommand (npm run dev),
+            // bukan oleh sidecar. Jendela dibuka setelah server dev siap.
+            if let Ok(dev_url) = std::env::var("KASIR_DEV_URL") {
+                let parsed = tauri::Url::parse(&dev_url)
+                    .map_err(|e| format!("KASIR_DEV_URL tidak valid: {e}"))?;
+                let port = parsed.port_or_known_default().unwrap_or(5173);
+                if !wait_for_server(port, Duration::from_secs(60)) {
+                    return Err(format!(
+                        "Server pengembangan di port {port} tidak merespons dalam 60 detik. \
+                         Pastikan tidak ada aplikasi lain yang memakai port tersebut."
+                    )
+                    .into());
+                }
+                tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::External(parsed))
+                    .title("Kasir Pintar Bengkel (dev)")
+                    .inner_size(1280.0, 800.0)
+                    .min_inner_size(1024.0, 700.0)
+                    .center()
+                    .build()
+                    .map_err(|e| format!("Gagal membuka jendela aplikasi: {e}"))?;
+                return Ok(());
+            }
+
             let resource_dir = app
                 .path()
                 .resource_dir()
