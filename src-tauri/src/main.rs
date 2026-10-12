@@ -183,10 +183,14 @@ fn main() {
     app.run(|app_handle, event| {
         if let tauri::RunEvent::Exit = event {
             let state = app_handle.state::<ServerState>();
-            if let Ok(mut guard) = state.child.lock() {
-                if let Some(child) = guard.as_mut() {
-                    let _ = child.kill();
-                }
+            // Gunakan match (bukan if-let pada hasil lock) agar `guard` dibuang
+            // SEBELUM `state` lepas — menghindari error masa pinjam E0597.
+            let mut guard = match state.child.lock() {
+                Ok(g) => g,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            if let Some(child) = guard.as_mut() {
+                let _ = child.kill();
             }
         }
     });
