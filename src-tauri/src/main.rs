@@ -44,11 +44,22 @@ fn find_free_port() -> Result<u16, String> {
     Ok(port)
 }
 
+/// Mengecek apakah sebuah port sudah menerima koneksi (IPv4, IPv6, atau localhost).
+fn port_open(port: u16) -> bool {
+    if TcpStream::connect(("127.0.0.1", port)).is_ok() {
+        return true;
+    }
+    if TcpStream::connect(("::1", port)).is_ok() {
+        return true;
+    }
+    TcpStream::connect(("localhost", port)).is_ok()
+}
+
 /// Menunggu server siap (maksimal `timeout`).
 fn wait_for_server(port: u16, timeout: Duration) -> bool {
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
-        if TcpStream::connect(("127.0.0.1", port)).is_ok() {
+        if port_open(port) {
             return true;
         }
         std::thread::sleep(Duration::from_millis(200));
@@ -91,19 +102,43 @@ fn main() {
         .invoke_handler(tauri::generate_handler![open_data_folder])
         .setup(|app| {
             // ---------- Mode pengembangan: `npm run app` (tauri dev) ----------
-            // Server & tampilan dijalankan oleh beforeDevCommand (npm run dev),
-            // bukan oleh sidecar. Jendela dibuka setelah server dev siap.
+            // Kita menyalakan sendiri server dev (`npm run dev`) bila belum ada
+            // yang membuka port-nya, lalu membuka jendela setelah server siap.
             if let Ok(dev_url) = std::env::var("KASIR_DEV_URL") {
                 let parsed = tauri::Url::parse(&dev_url)
                     .map_err(|e| format!("KASIR_DEV_URL tidak valid: {e}"))?;
                 let port = parsed.port_or_known_default().unwrap_or(5173);
-                if !wait_for_server(port, Duration::from_secs(60)) {
+
+                let mut dev_child: Option<Child> = None;
+                if !port_open(port) {
+                    // Server dev belum jalan — jalankan sendiri dari folder proyek.
+                    let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                        .parent()
+                        .map(|p| p.to_path_buf())
+                        .ok_or_else(|| "Folder proyek tidak ditemukan.".to_string())?;
+                    let mut cmd = Command::new("cmd");
+                    cmd.arg("/c")
+                        .arg("npm")
+                        .arg("run")
+                        .arg("dev")
+                        .current_dir(&repo_root);
+                    let child = cmd
+                        .spawn()
+                        .map_err(|e| format!("Gagal menjalankan 'npm run dev': {e}"))?;
+                    dev_child = Some(child);
+                }
+
+                if !wait_for_server(port, Duration::from_secs(90)) {
                     return Err(format!(
-                        "Server pengembangan di port {port} tidak merespons dalam 60 detik. \
-                         Pastikan tidak ada aplikasi lain yang memakai port tersebut."
+                        "Server pengembangan (port {port}) tidak merespons dalam 90 detik. \
+                         Kemungkinan penyebab: (1) ada pesan ERROR di atas dari 'npm run dev' — \
+                         jalankan 'npm run dev' di CMD terpisah untuk melihatnya; \
+                         (2) perpustakaan belum lengkap — jalankan 'npm install --include=dev'; \
+                         (3) port {port} sudah dipakai aplikasi lain."
                     )
                     .into());
                 }
+
                 tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::External(parsed))
                     .title("Kasir Pintar Bengkel (dev)")
                     .inner_size(1280.0, 800.0)
@@ -111,6 +146,10 @@ fn main() {
                     .center()
                     .build()
                     .map_err(|e| format!("Gagal membuka jendela aplikasi: {e}"))?;
+
+                if let Ok(mut guard) = app.state::<ServerState>().child.lock() {
+                    *guard = dev_child;
+                }
                 return Ok(());
             }
 
@@ -190,6 +229,17 @@ fn main() {
                 Err(poisoned) => poisoned.into_inner(),
             };
             if let Some(child) = guard.as_mut() {
+                // Bunuh satu pohon proses (npm/concurrently/node) agar tidak ada
+                // yang tertinggal memegang port setelah aplikasi ditutup.
+                #[cfg(windows)]
+                {
+                    use std::process::Stdio;
+                    let _ = Command::new("taskkill")
+                        .args(["/PID", &child.id().to_string(), "/T", "/F"])
+                        .stdout(Stdio::null())
+                        .stderr(Stdio::null())
+                        .spawn();
+                }
                 let _ = child.kill();
             }
         }
