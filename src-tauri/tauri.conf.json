@@ -4,7 +4,6 @@
   "version": "1.0.0",
   "identifier": "com.richie.kasirpintarbengkel",
   "build": {
-    "devUrl": "http://localhost:5173",
     "frontendDist": "../dist"
   },
   "app": {
