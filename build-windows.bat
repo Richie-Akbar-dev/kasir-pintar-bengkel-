@@ -206,7 +206,7 @@ REM [8/8] Merakit installer (.exe)
 REM ============================================================
 call :log "=== [8/8] npx tauri build ==="
 echo   Merakit installer... ^(10-30 menit, layar akan penuh teks^)
-powershell -NoProfile -ExecutionPolicy Bypass -Command "npx --yes @tauri-apps/cli@2 build 2>&1 | Tee-Object -FilePath '%LOG%' -Append; exit $LASTEXITCODE"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "npx --yes @tauri-apps/cli@2 build --config '%~dp0src-tauri\tauri.bundle.json' 2>&1 | Tee-Object -FilePath '%LOG%' -Append; exit $LASTEXITCODE"
 if errorlevel 1 (
   call :log "[GAGAL] tauri build"
   echo   [GAGAL] Perakitan gagal. Lihat build-log.txt

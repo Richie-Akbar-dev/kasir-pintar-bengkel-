@@ -24,7 +24,6 @@
       "icons/henry.w@example.org",
       "icons/icon.ico"
     ],
-    "resources": ["resources/app/**/*"],
     "windows": {
       "webviewInstallMode": {
         "type": "downloadBootstrapper"
