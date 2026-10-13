@@ -60,7 +60,7 @@ router.post(
   asyncHandler((req, res) => {
     const b = req.body || {};
     if (!b.customerName?.trim()) return badRequest(res, 'Nama pelanggan wajib diisi.');
-    if (!b.complaint?.trim()) return badRequest(res, 'Keluhan / permintaan wajib diisi.');
+    // Keluhan bersifat opsional (dari kasir cukup nama pelanggan + item)
 
     const maxQueue = db.all('work_orders').reduce((a, w) => Math.max(a, num(w.queueNumber)), 0);
     const now = new Date();
@@ -77,9 +77,14 @@ router.post(
         name: source.name,
         qty: Math.max(1, intNum(raw.qty, 1)),
         unit: raw.type === 'service' ? 'Layanan' : source.unit || 'Pcs',
-        price: raw.type === 'service' ? num(source.price) : num(source.sellPrice),
+        price:
+          raw.price != null
+            ? num(raw.price)
+            : raw.type === 'service'
+              ? num(source.price)
+              : num(source.sellPrice),
         costPrice: raw.type === 'service' ? 0 : num(source.costPrice),
-        discount: 0,
+        discount: Math.max(0, num(raw.discount) || 0),
       };
     }).filter(Boolean);
 
@@ -87,33 +92,64 @@ router.post(
     const vehicle = b.vehicleId ? db.byId('vehicles', b.vehicleId) : null;
     const mechanic = b.mechanicId ? db.byId('mechanics', b.mechanicId) : null;
 
-    res.status(201).json({
-      data: enrich(
-        db.insert('work_orders', {
-          code: `SPK-${String(maxQueue + 1).padStart(4, '0')}`,
-          queueNumber: maxQueue + 1,
-          date: now.toISOString(),
-          customerId: customer ? customer.id : null,
-          customerName: customer ? customer.name : String(b.customerName).trim(),
-          customerPhone: customer ? customer.phone : b.customerPhone?.trim() || '',
-          vehicleId: vehicle ? vehicle.id : null,
-          plateNumber: vehicle ? vehicle.plateNumber : b.plateNumber?.trim() || '',
-          vehicleLabel: vehicle
-            ? `${vehicle.brand} ${vehicle.model}`.trim()
-            : b.vehicleLabel?.trim() || '',
-          complaint: String(b.complaint).trim(),
-          diagnosis: b.diagnosis?.trim() || '',
-          mechanicId: mechanic ? mechanic.id : null,
-          mechanicName: mechanic ? mechanic.name : b.mechanicName?.trim() || '',
-          odometer: b.odometer ? intNum(b.odometer) : null,
-          status: STATUSES.includes(b.status) ? b.status : 'menunggu',
-          estimatedCost: intNum(b.estimatedCost),
-          items,
-          note: b.note?.trim() || '',
-          transactionId: null,
-        })
-      ),
+    const row = db.insert('work_orders', {
+      code: `SPK-${String(maxQueue + 1).padStart(4, '0')}`,
+      queueNumber: maxQueue + 1,
+      date: now.toISOString(),
+      customerId: customer ? customer.id : null,
+      customerName: customer ? customer.name : String(b.customerName).trim(),
+      customerPhone: customer ? customer.phone : b.customerPhone?.trim() || '',
+      vehicleId: vehicle ? vehicle.id : null,
+      plateNumber: vehicle ? vehicle.plateNumber : b.plateNumber?.trim() || '',
+      vehicleLabel: vehicle
+        ? `${vehicle.brand} ${vehicle.model}`.trim()
+        : b.vehicleLabel?.trim() || '',
+      complaint: String(b.complaint || 'Pekerjaan dari kasir').trim(),
+      diagnosis: b.diagnosis?.trim() || '',
+      mechanicId: mechanic ? mechanic.id : null,
+      mechanicName: mechanic ? mechanic.name : b.mechanicName?.trim() || '',
+      odometer: b.odometer ? intNum(b.odometer) : null,
+      status: STATUSES.includes(b.status) ? b.status : 'menunggu',
+      estimatedCost: intNum(b.estimatedCost),
+      items,
+      note: b.note?.trim() || '',
+      transactionId: null,
     });
+
+    // Pengurangan stok khusus dari kasir ("A. Simpan") — barang pasti dipakai.
+    // Validasi dulu semua item; bila ada yang kurang, work order dibatalkan.
+    if (b.commitStock) {
+      for (const it of row.items) {
+        if (it.type !== 'product') continue;
+        const product = db.byId('products', it.refId);
+        if (!product) continue;
+        if (num(product.stock) < it.qty) {
+          db.remove('work_orders', row.id);
+          return badRequest(
+            res,
+            `Stok "${product.name}" tidak mencukupi (tersisa ${num(product.stock)}).`
+          );
+        }
+      }
+      for (const it of row.items) {
+        if (it.type !== 'product') continue;
+        const product = db.byId('products', it.refId);
+        if (!product) continue;
+        db.update('products', product.id, { stock: num(product.stock) - it.qty });
+        db.insert('stock_movements', {
+          productId: product.id,
+          productName: product.name,
+          type: 'out',
+          qty: it.qty,
+          refType: 'workorder',
+          refId: row.id,
+          refCode: row.code,
+          note: 'Pengambilan untuk pekerjaan',
+        });
+      }
+    }
+
+    res.status(201).json({ data: enrich(row) });
   })
 );
 
@@ -182,6 +218,15 @@ router.delete(
     const row = db.byId('work_orders', req.params.id);
     if (!row) return res.status(404).json({ error: 'Work order tidak ditemukan.' });
     if (row.transactionId) return badRequest(res, 'Work order sudah masuk transaksi, tidak bisa dihapus.');
+    // Kembalikan stok yang dikurangi saat "A. Simpan" dari kasir
+    for (const m of db.find(
+      'stock_movements',
+      (m) => m.refType === 'workorder' && m.refId === row.id
+    )) {
+      const product = db.byId('products', m.productId);
+      if (product) db.update('products', product.id, { stock: num(product.stock) + num(m.qty) });
+      db.remove('stock_movements', m.id);
+    }
     db.remove('work_orders', row.id);
     res.json({ ok: true });
   })

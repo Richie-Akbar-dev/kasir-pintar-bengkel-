@@ -14,6 +14,7 @@ import Layout from '@/components/Layout';
 import Login from '@/pages/Login';
 import Dashboard from '@/pages/Dashboard';
 import Kasir from '@/pages/Kasir';
+import Pembayaran from '@/pages/Pembayaran';
 import WorkOrder from '@/pages/WorkOrder';
 import Riwayat from '@/pages/Riwayat';
 import Sparepart from '@/pages/Sparepart';
@@ -88,6 +89,7 @@ export default function App() {
             >
               <Route path="/" element={<Dashboard />} />
               <Route path="/kasir" element={<Kasir />} />
+              <Route path="/kasir/bayar" element={<Pembayaran />} />
               <Route path="/work-order" element={<WorkOrder />} />
               <Route path="/riwayat" element={<Riwayat />} />
               <Route path="/sparepart" element={<Sparepart />} />

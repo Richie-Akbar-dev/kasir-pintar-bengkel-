@@ -1,35 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { api, qs } from '@/lib/api';
+import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { useApi } from '@/lib/useApi';
 import { rupiah } from '@/lib/format';
-import {
-  PAYMENT_LABELS,
-  type Customer,
-  type Mechanic,
-  type PaymentMethod,
-  type Product,
-  type Service,
-  type Transaction,
-  type Vehicle,
-} from '@/lib/types';
+import type { Mechanic, Product, Service } from '@/lib/types';
 import {
   Badge,
   Button,
   Card,
-  Checkbox,
   Field,
   Input,
-  Modal,
   NumberInput,
   Select,
-  Textarea,
   useToast,
 } from '@/components/ui';
 import { Icon } from '@/components/icons';
-import ReceiptModal from '@/components/Receipt';
-import { beep, beepError, isDirectPrint, printTransaction } from '@/lib/hardware';
+import { beep, beepError } from '@/lib/hardware';
 
 interface CartItem {
   key: string;
@@ -46,7 +33,15 @@ interface CartItem {
   stock: number;
 }
 
-const PAYMENTS: PaymentMethod[] = ['cash', 'transfer', 'qris', 'debit', 'credit'];
+/** Keranjang disimpan sementara untuk halaman Pembayaran. */
+export interface KasirCartSave {
+  items: CartItem[];
+  customerName: string;
+  plateNumber: string;
+  workOrderId: string | null;
+}
+
+export const KASIR_CART_KEY = 'kasir-cart';
 
 export default function Kasir() {
   const { settings, user } = useAuth();
@@ -55,26 +50,16 @@ export default function Kasir() {
   const [params, setParams] = useSearchParams();
   const isOwner = user?.role === 'owner';
 
-  const [tab, setTab] = useState<'all' | 'product' | 'service'>('all');
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('');
 
   const [cart, setCart] = useState<CartItem[]>([]);
-  const [customer, setCustomer] = useState<Customer | null>(null);
-  const [vehicle, setVehicle] = useState<Vehicle | null>(null);
-  const [defaultMechanic, setDefaultMechanic] = useState('');
-  const [discountAmount, setDiscountAmount] = useState(0);
-  const [taxEnabled, setTaxEnabled] = useState(!!settings?.taxEnabled);
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash');
-  const [paidAmount, setPaidAmount] = useState(0);
-  const [note, setNote] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  const [lastTrx, setLastTrx] = useState<Transaction | null>(null);
+  const [customerName, setCustomerName] = useState('');
+  const [plateNumber, setPlateNumber] = useState('');
   const [workOrderId, setWorkOrderId] = useState<string | null>(params.get('wo'));
+  const [submitting, setSubmitting] = useState(false);
 
-  const [customerModal, setCustomerModal] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
-  const directPrint = isDirectPrint(settings);
 
   const products = useApi<{ data: Product[] }>('/api/products');
   const services = useApi<{ data: Service[] }>('/api/services');
@@ -90,25 +75,19 @@ export default function Kasir() {
     const woId = params.get('wo');
     if (!woId) return;
     api
-      .get<{ data: { customerId: string; vehicleId: string; mechanicId: string; items: CartItem[]; customerName: string; plateNumber: string } }>(
-        `/api/work-orders/${woId}`
-      )
-      .then(async (res) => {
+      .get<{
+        data: {
+          mechanicId: string;
+          items: CartItem[];
+          customerName: string;
+          plateNumber: string;
+        };
+      }>(`/api/work-orders/${woId}`)
+      .then((res) => {
         const wo = res.data;
         setWorkOrderId(woId);
-        if (wo.mechanicId) setDefaultMechanic(wo.mechanicId);
-        if (wo.customerId) {
-          try {
-            const c = await api.get<{ data: Customer }>(`/api/customers/${wo.customerId}`);
-            setCustomer(c.data);
-            if (wo.vehicleId) {
-              const v = (c.data.vehicles || []).find((x) => x.id === wo.vehicleId);
-              if (v) setVehicle(v);
-            }
-          } catch {
-            /* abaikan */
-          }
-        }
+        setCustomerName(wo.customerName || '');
+        setPlateNumber(wo.plateNumber || '');
         const loaded: CartItem[] = (wo.items || []).map((it) => ({
           key: `${it.type}-${it.refId}`,
           type: it.type,
@@ -124,20 +103,25 @@ export default function Kasir() {
           stock: 9999,
         }));
         setCart(loaded);
-        toast.push(`Item dari ${woId ? 'work order' : ''} berhasil dimuat`, 'info');
+        toast.push('Item dari work order berhasil dimuat', 'info');
       })
       .catch(() => toast.push('Work order tidak ditemukan.', 'error'));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.get('wo')]);
 
   /* -------------------------------- Katalog -------------------------------- */
+  /** Jumlah item yang sudah ada di keranjang (untuk stok visual). */
+  const reservedOf = useCallback(
+    (key: string) => cart.find((c) => c.key === key)?.qty || 0,
+    [cart]
+  );
+
   const catalog = useMemo(() => {
-    const list: Array<CartItem & { category: string; stock: number; durationMin?: number }> = [];
+    const list: Array<CartItem & { category: string; durationMin?: number }> = [];
     const needle = query.trim().toLowerCase();
 
     for (const p of products.data?.data || []) {
       if (p.active === false) continue;
-      if (tab === 'service') continue;
       if (category && p.category !== category) continue;
       if (
         needle &&
@@ -163,7 +147,6 @@ export default function Kasir() {
 
     for (const s of services.data?.data || []) {
       if (s.active === false) continue;
-      if (tab === 'product') continue;
       if (category && s.category !== category) continue;
       if (needle && !`${s.name} ${s.code} ${s.category}`.toLowerCase().includes(needle)) continue;
       list.push({
@@ -185,14 +168,14 @@ export default function Kasir() {
     }
 
     return list.slice(0, 60);
-  }, [products.data, services.data, query, tab, category]);
+  }, [products.data, services.data, query, category]);
 
   const categories = useMemo(() => {
     const set = new Set<string>();
-    for (const p of products.data?.data || []) if (tab !== 'service') set.add(p.category);
-    for (const s of services.data?.data || []) if (tab !== 'product') set.add(s.category);
+    for (const p of products.data?.data || []) set.add(p.category);
+    for (const s of services.data?.data || []) set.add(s.category);
     return [...set].sort();
-  }, [products.data, services.data, tab]);
+  }, [products.data, services.data]);
 
   /* --------------------------------- Keranjang --------------------------------- */
   const addToCart = useCallback(
@@ -206,13 +189,10 @@ export default function Kasir() {
           }
           return prev.map((c) => (c.key === item.key ? { ...c, qty: c.qty + 1 } : c));
         }
-        return [
-          ...prev,
-          { ...item, mechanicId: item.type === 'service' ? defaultMechanic : '' },
-        ];
+        return [...prev, { ...item }];
       });
     },
-    [defaultMechanic, toast]
+    [toast]
   );
 
   const updateItem = useCallback((key: string, patch: Partial<CartItem>) => {
@@ -225,33 +205,16 @@ export default function Kasir() {
 
   const clearAll = useCallback(() => {
     setCart([]);
-    setCustomer(null);
-    setVehicle(null);
-    setDiscountAmount(0);
-    setPaidAmount(0);
-    setNote('');
+    setCustomerName('');
+    setPlateNumber('');
     setWorkOrderId(null);
-    setDefaultMechanic('');
     if (params.get('wo')) setParams({}, { replace: true });
   }, [params, setParams]);
 
   /* ---------------------------------- Total ---------------------------------- */
   const subtotal = cart.reduce((a, c) => a + c.price * c.qty, 0);
   const itemDiscount = cart.reduce((a, c) => a + c.discount, 0);
-  const discount = Math.min(discountAmount, subtotal - itemDiscount);
-  const taxable = Math.max(0, subtotal - itemDiscount - discount);
-  const taxAmount = taxEnabled ? Math.round((taxable * (settings?.taxPercent || 0)) / 100) : 0;
-  const total = Math.max(0, taxable + taxAmount);
-  const change = paymentMethod === 'cash' ? Math.max(0, paidAmount - total) : 0;
-
-  useEffect(() => {
-    if (paymentMethod !== 'cash') setPaidAmount(total);
-  }, [paymentMethod, total]);
-
-  // Ikuti pengaturan PPN bengkel saat data pengaturan baru dimuat
-  useEffect(() => {
-    setTaxEnabled(!!settings?.taxEnabled);
-  }, [settings?.taxEnabled]);
+  const total = Math.max(0, subtotal - itemDiscount);
 
   /** Enter pada kolom pencarian: tambahkan item pertama yang cocok (hasil scan). */
   function handleSearchKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
@@ -275,66 +238,52 @@ export default function Kasir() {
     searchRef.current?.focus();
   }
 
-  /* --------------------------------- Simpan --------------------------------- */
-  async function submit(then: 'print' | 'stay') {
+  /* --------------------------- A. Simpan → Work Order --------------------------- */
+  async function saveWorkOrder() {
     if (!cart.length) return toast.push('Keranjang masih kosong.', 'error');
-    if (paymentMethod === 'cash' && paidAmount < total)
-      return toast.push('Jumlah uang tunai kurang dari total.', 'error');
-
+    if (!customerName.trim()) {
+      beepError();
+      return toast.push('Nama pelanggan wajib diisi.', 'error');
+    }
     setSubmitting(true);
     try {
-      const res = await api.post<{ data: Transaction }>('/api/transactions', {
+      const res = await api.post<{ data: { code: string } }>('/api/work-orders', {
+        customerName: customerName.trim(),
+        plateNumber: plateNumber.trim(),
+        complaint: 'Pekerjaan dari kasir',
+        status: 'menunggu',
+        commitStock: true,
         items: cart.map((c) => ({
           type: c.type,
           refId: c.refId,
           qty: c.qty,
           price: c.price,
           discount: c.discount,
-          mechanicId: c.type === 'service' ? c.mechanicId || defaultMechanic : c.mechanicId,
         })),
-        customerId: customer?.id || null,
-        customerName: customer?.name || 'Pelanggan Umum',
-        vehicleId: vehicle?.id || null,
-        plateNumber: vehicle?.plateNumber || '',
-        mechanicId: defaultMechanic || null,
-        discountAmount: discount,
-        taxEnabled,
-        taxPercent: settings?.taxPercent ?? 0,
-        paymentMethod,
-        paidAmount: paymentMethod === 'cash' ? paidAmount : total,
-        note,
-        workOrderId,
       });
-      setLastTrx(res.data);
-      toast.push(`Transaksi ${res.data.code} tersimpan`);
-
-      if (then === 'print' && directPrint) {
-        // Cetak langsung ke printer thermal + buka laci bila Tunai
-        try {
-          const out = await printTransaction(res.data.id);
-          toast.push(
-            out.drawerOpened ? 'Struk tercetak & laci uang terbuka.' : 'Struk terkirim ke printer.'
-          );
-        } catch (err) {
-          toast.push(
-            err instanceof Error ? err.message : 'Gagal mencetak ke printer. Silakan cetak ulang.'
-          , 'error');
-        }
-      }
-
+      toast.push(`Work order ${res.data.code} tersimpan — stok sudah diperbarui.`);
       clearAll();
-      if (then === 'stay') setLastTrx(null);
-      products.reload();
     } catch (err) {
-      toast.push(err instanceof Error ? err.message : 'Gagal menyimpan transaksi.', 'error');
+      toast.push(err instanceof Error ? err.message : 'Gagal menyimpan work order.', 'error');
     } finally {
       setSubmitting(false);
     }
   }
 
-  /* ---------------------------------- Render ---------------------------------- */
-  const customerVehicles = customer?.vehicles || [];
+  /* ---------------------------- B. Bayar → halaman bayar ---------------------------- */
+  function goToPayment() {
+    if (!cart.length) return toast.push('Keranjang masih kosong.', 'error');
+    const save: KasirCartSave = {
+      items: cart,
+      customerName: customerName.trim(),
+      plateNumber: plateNumber.trim(),
+      workOrderId,
+    };
+    sessionStorage.setItem(KASIR_CART_KEY, JSON.stringify(save));
+    navigate('/kasir/bayar');
+  }
 
+  /* ---------------------------------- Render ---------------------------------- */
   return (
     <div className="pb-10">
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-5">
@@ -343,28 +292,6 @@ export default function Kasir() {
           <Card padded={false}>
             <div className="space-y-3 p-4">
               <div className="flex flex-wrap items-center gap-2">
-                <div className="flex rounded-lg bg-slate-100 p-0.5">
-                  {(
-                    [
-                      ['all', 'Semua'],
-                      ['product', 'Sparepart'],
-                      ['service', 'Jasa Servis'],
-                    ] as const
-                  ).map(([key, label]) => (
-                    <button
-                      key={key}
-                      onClick={() => {
-                        setTab(key);
-                        setCategory('');
-                      }}
-                      className={`rounded-md px-3 py-1.5 text-[13px] font-medium transition ${
-                        tab === key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
                 <div className="relative min-w-[220px] flex-1">
                   <Icon
                     name="search"
@@ -433,60 +360,65 @@ export default function Kasir() {
                   ))}
                 </div>
               )}
-            </div>
 
-            <div className="grid max-h-[calc(100vh-19rem)] grid-cols-1 gap-2 overflow-y-auto border-t border-slate-100 p-3 sm:grid-cols-2">
-              {products.loading && services.loading ? (
-                <p className="col-span-full py-10 text-center text-sm text-slate-400">Memuat katalog…</p>
-              ) : catalog.length === 0 ? (
-                <p className="col-span-full py-10 text-center text-sm text-slate-400">
-                  Tidak ada item yang cocok dengan pencarian.
-                </p>
-              ) : (
-                catalog.map((item) => {
-                  const lowStock = item.type === 'product' && item.stock <= 0;
-                  return (
-                    <button
-                      key={item.key}
-                      onClick={() => addToCart(item)}
-                      disabled={lowStock}
-                      className={`flex items-start gap-3 rounded-lg border p-3 text-left transition ${
-                        lowStock
-                          ? 'cursor-not-allowed border-slate-200 bg-slate-50 opacity-60'
-                          : 'border-slate-200 bg-white hover:border-brand-400 hover:bg-brand-50/40 hover:shadow-sm'
-                      }`}
-                    >
-                      <span
-                        className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
-                          item.type === 'product' ? 'bg-slate-100 text-slate-500' : 'bg-accent-50 text-accent-600'
+              {/* Hasil */}
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {catalog.length === 0 ? (
+                  <p className="col-span-full py-10 text-center text-sm text-slate-400">
+                    Tidak ada item yang cocok.
+                  </p>
+                ) : (
+                  catalog.map((item) => {
+                    const reserved = reservedOf(item.key);
+                    const avail = item.stock - reserved;
+                    const empty = item.type === 'product' && avail <= 0;
+                    return (
+                      <button
+                        key={item.key}
+                        onClick={() => addToCart(item)}
+                        disabled={empty}
+                        className={`flex items-start gap-3 rounded-lg border p-3 text-left transition ${
+                          empty
+                            ? 'cursor-not-allowed border-slate-200 bg-slate-50 opacity-60'
+                            : 'border-slate-200 bg-white hover:border-brand-400 hover:bg-brand-50/40 hover:shadow-sm'
                         }`}
                       >
-                        <Icon name={item.type === 'product' ? 'box' : 'wrench'} size={17} />
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[13px] font-medium text-slate-800">
-                          {item.name}
+                        <span
+                          className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
+                            item.type === 'product'
+                              ? 'bg-slate-100 text-slate-500'
+                              : 'bg-accent-50 text-accent-600'
+                          }`}
+                        >
+                          <Icon name={item.type === 'product' ? 'box' : 'wrench'} size={17} />
                         </span>
-                        <span className="mt-0.5 flex items-center gap-1.5">
-                          <span className="font-mono text-[10px] text-slate-400">{item.code}</span>
-                          <span className="text-[10px] text-slate-300">·</span>
-                          <span className="truncate text-[10px] text-slate-400">{item.category}</span>
-                        </span>
-                        <span className="mt-1.5 flex items-center gap-2">
-                          <span className="text-[13px] font-semibold tabular text-brand-700">
-                            {rupiah(item.price)}
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-[15px] font-medium text-slate-800">
+                            {item.name}
                           </span>
-                          {item.type === 'product' && (
-                            <Badge tone={item.stock <= 0 ? 'red' : item.stock <= 5 ? 'amber' : 'slate'}>
-                              stok {item.stock} {item.unit}
-                            </Badge>
-                          )}
+                          <span className="mt-0.5 flex items-center gap-1.5">
+                            <span className="font-mono text-[10px] text-slate-400">{item.code}</span>
+                            <span className="text-[10px] text-slate-300">·</span>
+                            <span className="truncate text-[10px] text-slate-400">
+                              {item.category}
+                            </span>
+                          </span>
+                          <span className="mt-1.5 flex items-center gap-2">
+                            <span className="text-[13px] font-semibold tabular text-brand-700">
+                              {rupiah(item.price)}
+                            </span>
+                            {item.type === 'product' && (
+                              <Badge tone={avail <= 0 ? 'red' : avail <= 5 ? 'amber' : 'slate'}>
+                                stok {avail} {item.unit}
+                              </Badge>
+                            )}
+                          </span>
                         </span>
-                      </span>
-                    </button>
-                  );
-                })
-              )}
+                      </button>
+                    );
+                  })
+                )}
+              </div>
             </div>
           </Card>
         </div>
@@ -494,41 +426,29 @@ export default function Kasir() {
         {/* ============================ KERANJANG ============================ */}
         <div className="xl:col-span-2">
           <div className="space-y-4 xl:sticky xl:top-20">
-            {/* Pelanggan */}
+            {/* Pelanggan — nama & plat diketik manual */}
             <Card padded={false}>
-              <div className="flex items-center justify-between gap-3 px-4 py-3">
-                <div className="min-w-0">
-                  <p className="truncate text-[13px] font-semibold text-slate-900">
-                    {customer ? customer.name : 'Pelanggan Umum'}
-                  </p>
-                  <p className="truncate text-xs text-slate-500">
-                    {vehicle
-                      ? `${vehicle.plateNumber} · ${vehicle.brand} ${vehicle.model}`
-                      : customer?.phone || 'Tanpa data kendaraan'}
-                  </p>
-                </div>
-                <Button size="sm" variant="outline" icon="users" onClick={() => setCustomerModal(true)}>
-                  Pilih
-                </Button>
+              <div className="space-y-3 px-4 py-3">
+                <Field label="Nama pelanggan" required>
+                  <Input
+                    value={customerName}
+                    onChange={(e) => setCustomerName(e.target.value)}
+                    placeholder="Contoh: Andi"
+                    className="h-10 text-[13px]"
+                  />
+                </Field>
+                <Field label="Plat nomor (opsional)">
+                  <Input
+                    value={plateNumber}
+                    onChange={(e) => setPlateNumber(e.target.value.toUpperCase())}
+                    placeholder="Contoh: W 1234 AB"
+                    className="h-10 text-[13px]"
+                  />
+                </Field>
+                <p className="text-[11px] text-slate-400">
+                  Nama dipakai sebagai pembeda antar pelanggan.
+                </p>
               </div>
-              {customer && customerVehicles.length > 0 && (
-                <div className="border-t border-slate-100 px-4 py-2.5">
-                  <Select
-                    value={vehicle?.id || ''}
-                    onChange={(e) =>
-                      setVehicle(customerVehicles.find((v) => v.id === e.target.value) || null)
-                    }
-                    className="h-9 text-[13px]"
-                  >
-                    <option value="">— Tanpa kendaraan —</option>
-                    {customerVehicles.map((v) => (
-                      <option key={v.id} value={v.id}>
-                        {v.plateNumber} · {v.brand} {v.model}
-                      </option>
-                    ))}
-                  </Select>
-                </div>
-              )}
             </Card>
 
             {/* Item */}
@@ -549,17 +469,18 @@ export default function Kasir() {
                   Klik item di katalog untuk menambahkan.
                 </p>
               ) : (
-                <ul className="max-h-[46vh] divide-y divide-slate-100 overflow-y-auto">
+                <ul className="max-h-[42vh] divide-y divide-slate-100 overflow-y-auto">
                   {cart.map((item) => (
                     <li key={item.key} className="px-4 py-3">
                       <div className="flex items-start gap-2">
                         <div className="min-w-0 flex-1">
-                          <p className="truncate text-[13px] font-medium text-slate-800">{item.name}</p>
+                          <p className="truncate text-[13px] font-medium text-slate-800">
+                            {item.name}
+                          </p>
                           <p className="mt-0.5 flex items-center gap-1.5 text-[11px] text-slate-400">
                             <span className="font-mono">{item.code}</span>
                             <span>·</span>
                             <span>{rupiah(item.price)}</span>
-                            {item.type === 'product' && <span>· stok {item.stock}</span>}
                           </p>
                         </div>
                         <button
@@ -653,179 +574,51 @@ export default function Kasir() {
                 </ul>
               )}
 
-              {/* Ringkasan */}
-              <div className="space-y-2 border-t border-slate-100 bg-slate-50 px-4 py-3">
+              {/* Ringkasan + aksi */}
+              <div className="space-y-3 border-t border-slate-100 bg-slate-50 px-4 py-3">
                 <div className="flex items-center justify-between text-[13px] text-slate-600">
                   <span>Subtotal</span>
                   <span className="tabular">{rupiah(subtotal)}</span>
                 </div>
-                {itemDiscount + discount > 0 && (
+                {itemDiscount > 0 && (
                   <div className="flex items-center justify-between text-[13px] text-emerald-600">
-                    <span>Diskon</span>
-                    <span className="tabular">-{rupiah(itemDiscount + discount)}</span>
-                  </div>
-                )}
-                {taxEnabled && (
-                  <div className="flex items-center justify-between text-[13px] text-slate-600">
-                    <span>PPN {settings?.taxPercent ?? 0}%</span>
-                    <span className="tabular">{rupiah(taxAmount)}</span>
+                    <span>Diskon item</span>
+                    <span className="tabular">-{rupiah(itemDiscount)}</span>
                   </div>
                 )}
                 <div className="flex items-center justify-between border-t border-slate-200 pt-2 text-base font-semibold text-slate-900">
                   <span>Total</span>
                   <span className="tabular text-brand-700">{rupiah(total)}</span>
                 </div>
-              </div>
-            </Card>
-
-            {/* Pembayaran */}
-            <Card title="Pembayaran" padded={false}>
-              <div className="space-y-3 p-4">
-                <div className="grid grid-cols-3 gap-2">
-                  {PAYMENTS.map((m) => (
-                    <button
-                      key={m}
-                      onClick={() => setPaymentMethod(m)}
-                      className={`rounded-lg border px-2 py-2 text-[12px] font-medium transition ${
-                        paymentMethod === m
-                          ? 'border-brand-500 bg-brand-600 text-white shadow-sm'
-                          : 'border-slate-300 bg-white text-slate-600 hover:bg-slate-50'
-                      }`}
-                    >
-                      {PAYMENT_LABELS[m]}
-                    </button>
-                  ))}
-                </div>
-
-                {paymentMethod === 'cash' ? (
-                  <div className="space-y-2">
-                    <Field label="Uang diterima">
-                      <NumberInput
-                        value={paidAmount}
-                        onChange={setPaidAmount}
-                        prefix="Rp"
-                        className="h-11 text-base font-semibold"
-                        autoFocus
-                      />
-                    </Field>
-                    <div className="flex flex-wrap gap-1.5">
-                      {[total, 20_000, 50_000, 100_000, 150_000, 200_000]
-                        .filter((v) => v > 0)
-                        .map((v) => (
-                          <button
-                            key={v}
-                            onClick={() => setPaidAmount(Math.max(v, total))}
-                            className="rounded-md border border-slate-300 bg-white px-2 py-1 text-[11px] text-slate-600 transition hover:bg-slate-50"
-                          >
-                            {rupiah(v)}
-                          </button>
-                        ))}
-                      <button
-                        onClick={() => setPaidAmount(Math.ceil(total / 5000) * 5000)}
-                        className="rounded-md border border-brand-300 bg-brand-50 px-2 py-1 text-[11px] font-medium text-brand-700 transition hover:bg-brand-100"
-                      >
-                        Bulatkan
-                      </button>
-                    </div>
-                    <div
-                      className={`flex items-center justify-between rounded-lg px-3 py-2.5 ${
-                        paidAmount >= total ? 'bg-emerald-50' : 'bg-amber-50'
-                      }`}
-                    >
-                      <span className="text-[13px] font-medium text-slate-700">Kembalian</span>
-                      <span
-                        className={`text-lg font-bold tabular ${
-                          paidAmount >= total ? 'text-emerald-700' : 'text-amber-700'
-                        }`}
-                      >
-                        {rupiah(change)}
-                      </span>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="rounded-lg bg-slate-50 px-3 py-2.5 text-[13px] text-slate-600">
-                    {paymentMethod === 'credit'
-                      ? 'Transaksi dicatat sebagai bon/piutang. Tandai lunas nanti di menu Riwayat.'
-                      : `Pembayaran ${PAYMENT_LABELS[paymentMethod]} sebesar ${rupiah(total)}.`}
-                  </div>
-                )}
-
-                <div className="grid grid-cols-2 gap-2">
-                  <Field label="Diskon transaksi">
-                    <NumberInput
-                      value={discountAmount}
-                      onChange={(v) => setDiscountAmount(Math.min(v, subtotal - itemDiscount))}
-                      prefix="Rp"
-                      className="h-9 text-[13px]"
-                    />
-                  </Field>
-                  <Field label="Mekanik (default)">
-                    <Select
-                      value={defaultMechanic}
-                      onChange={(e) => {
-                        setDefaultMechanic(e.target.value);
-                        setCart((prev) =>
-                          prev.map((c) =>
-                            c.type === 'service' && !c.mechanicId
-                              ? { ...c, mechanicId: e.target.value }
-                              : c
-                          )
-                        );
-                      }}
-                      className="h-9 text-[13px]"
-                    >
-                      <option value="">— Tidak ada —</option>
-                      {(mechanics.data?.data || [])
-                        .filter((m) => m.active !== false)
-                        .map((m) => (
-                          <option key={m.id} value={m.id}>
-                            {m.name}
-                          </option>
-                        ))}
-                    </Select>
-                  </Field>
-                </div>
-
-                {settings?.taxEnabled !== false && (
-                  <Checkbox
-                    label={`Kenakan PPN ${settings?.taxPercent ?? 0}%`}
-                    checked={taxEnabled}
-                    onChange={(e) => setTaxEnabled(e.target.checked)}
-                  />
-                )}
-
-                <Textarea
-                  rows={2}
-                  value={note}
-                  onChange={(e) => setNote(e.target.value)}
-                  placeholder="Catatan (opsional)"
-                  className="text-[13px]"
-                />
 
                 <div className="grid grid-cols-2 gap-2 pt-1">
                   <Button
                     variant="outline"
                     size="lg"
-                    onClick={() => submit('stay')}
+                    icon="clipboard"
+                    onClick={saveWorkOrder}
                     loading={submitting}
                     disabled={!cart.length}
                   >
-                    Simpan
+                    A. Simpan
                   </Button>
                   <Button
                     variant="accent"
                     size="lg"
-                    icon="printer"
-                    onClick={() => submit('print')}
-                    loading={submitting}
+                    icon="cash"
+                    onClick={goToPayment}
                     disabled={!cart.length}
                   >
-                    Bayar & Cetak
+                    B. Bayar →
                   </Button>
                 </div>
+                <p className="text-center text-[11px] text-slate-500">
+                  <strong>A. Simpan</strong> = barang masuk daftar pekerjaan (work order), stok
+                  berkurang. · <strong>B. Bayar</strong> = lanjut ke halaman pembayaran.
+                </p>
                 {workOrderId && (
                   <p className="text-center text-[11px] text-slate-500">
-                    Transaksi ini terhubung dengan work order{' '}
+                    Terhubung dengan work order{' '}
                     <button
                       className="text-brand-600 hover:underline"
                       onClick={() => navigate('/work-order')}
@@ -839,134 +632,6 @@ export default function Kasir() {
           </div>
         </div>
       </div>
-
-      {/* -------------------------- Modal pelanggan -------------------------- */}
-      <CustomerPicker
-        open={customerModal}
-        onClose={() => setCustomerModal(false)}
-        onPick={(c, v) => {
-          setCustomer(c);
-          setVehicle(v || null);
-          setCustomerModal(false);
-        }}
-        onReset={() => {
-          setCustomer(null);
-          setVehicle(null);
-          setCustomerModal(false);
-        }}
-      />
-
-      <ReceiptModal
-        trx={lastTrx}
-        settings={settings}
-        autoPrint={!directPrint}
-        onClose={() => setLastTrx(null)}
-        onDone={() => {
-          setLastTrx(null);
-          clearAll();
-        }}
-      />
     </div>
-  );
-}
-
-/* ======================== Pemilih pelanggan ======================== */
-
-function CustomerPicker({
-  open,
-  onClose,
-  onPick,
-  onReset,
-}: {
-  open: boolean;
-  onClose: () => void;
-  onPick: (customer: Customer, vehicle?: Vehicle | null) => void;
-  onReset: () => void;
-}) {
-  const [q, setQ] = useState('');
-  const { data, loading } = useApi<{ data: Customer[] }>(open ? `/api/customers${qs({ q })}` : null, [q]);
-  const [expanded, setExpanded] = useState<string | null>(null);
-
-  return (
-    <Modal
-      open={open}
-      onClose={onClose}
-      title="Pilih pelanggan"
-      subtitle="Cari berdasarkan nama, nomor HP, atau alamat"
-      size="lg"
-      footer={
-        <Button variant="ghost" onClick={onReset}>
-          Reset ke Pelanggan Umum
-        </Button>
-      }
-    >
-      <div className="space-y-3">
-        <Input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="Ketik nama pelanggan…"
-          autoFocus
-        />
-        <div className="max-h-[52vh] overflow-y-auto">
-          {loading ? (
-            <p className="py-8 text-center text-sm text-slate-400">Memuat…</p>
-          ) : !data?.data.length ? (
-            <p className="py-8 text-center text-sm text-slate-400">
-              Pelanggan tidak ditemukan. Tambahkan dulu di menu Pelanggan.
-            </p>
-          ) : (
-            <ul className="divide-y divide-slate-100">
-              {data.data.map((c) => (
-                <li key={c.id}>
-                  <div className="flex items-center gap-3 px-1 py-2.5">
-                    <button
-                      className="flex min-w-0 flex-1 items-center gap-3 text-left"
-                      onClick={() => setExpanded(expanded === c.id ? null : c.id)}
-                    >
-                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-50 text-brand-600">
-                        <Icon name="user" size={17} />
-                      </span>
-                      <span className="min-w-0">
-                        <span className="block truncate text-[13px] font-medium text-slate-800">
-                          {c.name}
-                        </span>
-                        <span className="block truncate text-[11px] text-slate-500">
-                          {c.phone} · {c.vehicleCount || 0} kendaraan · {c.transactionCount || 0} transaksi
-                        </span>
-                      </span>
-                    </button>
-                    <Button size="xs" onClick={() => onPick(c, null)}>
-                      Pilih
-                    </Button>
-                  </div>
-                  {expanded === c.id && (
-                    <div className="mb-2 ml-12 space-y-1.5 border-l-2 border-slate-100 pl-3">
-                      {(c.vehicles || []).length === 0 ? (
-                        <p className="text-[11px] text-slate-400">Belum ada kendaraan terdaftar.</p>
-                      ) : (
-                        (c.vehicles || []).map((v) => (
-                          <button
-                            key={v.id}
-                            onClick={() => onPick(c, v)}
-                            className="flex w-full items-center justify-between gap-3 rounded-md px-2 py-1.5 text-left transition hover:bg-brand-50"
-                          >
-                            <span className="text-[13px] font-medium text-slate-800">
-                              {v.plateNumber}
-                            </span>
-                            <span className="truncate text-[11px] text-slate-500">
-                              {v.brand} {v.model} {v.year ? `(${v.year})` : ''}
-                            </span>
-                          </button>
-                        ))
-                      )}
-                    </div>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </div>
-    </Modal>
   );
 }

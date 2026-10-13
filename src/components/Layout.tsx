@@ -45,6 +45,7 @@ const NAV_GROUPS: Array<{ title: string; items: NavItem[] }> = [
 const TITLES: Record<string, string> = {
   '/': 'Dashboard',
   '/kasir': 'Kasir',
+  '/kasir/bayar': 'Pembayaran',
   '/work-order': 'Work Order / SPK',
   '/riwayat': 'Riwayat Transaksi',
   '/sparepart': 'Sparepart & Stok',

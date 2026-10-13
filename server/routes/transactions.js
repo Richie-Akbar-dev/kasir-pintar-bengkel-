@@ -184,6 +184,20 @@ router.post(
     if (!isCredit && paidAmount < total)
       return badRequest(res, 'Jumlah bayar kurang dari total tagihan.');
 
+    // Jika transaksi ini berasal dari work order yang stoknya sudah dikurangi
+    // saat "A. Simpan" dari kasir, kembalikan dulu agar tidak berkurang dua kali.
+    const linkedWo = b.workOrderId ? db.byId('work_orders', b.workOrderId) : null;
+    if (linkedWo) {
+      for (const m of db.find(
+        'stock_movements',
+        (m) => m.refType === 'workorder' && m.refId === linkedWo.id
+      )) {
+        const product = db.byId('products', m.productId);
+        if (product) db.update('products', product.id, { stock: num(product.stock) + num(m.qty) });
+        db.remove('stock_movements', m.id);
+      }
+    }
+
     // --- Kurangi stok & catat pergerakan ---
     for (const it of items) {
       if (it.type !== 'product') continue;
