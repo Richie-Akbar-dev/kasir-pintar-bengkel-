@@ -1,9 +1,8 @@
 import { Link } from 'react-router-dom';
 import { useApi } from '@/lib/useApi';
 import { useAuth } from '@/lib/auth';
-import { rupiah, rupiahShort, relativeDay, formatDate } from '@/lib/format';
+import { rupiah, formatDate } from '@/lib/format';
 import type { DashboardSummary } from '@/lib/types';
-import { PAYMENT_LABELS } from '@/lib/types';
 import {
   Badge,
   Button,
@@ -11,9 +10,6 @@ import {
   ErrorBanner,
   LoadingBlock,
   StatCard,
-  Td,
-  TableWrap,
-  Th,
 } from '@/components/ui';
 import { Icon } from '@/components/icons';
 import { AreaChart } from '@/components/Chart';
@@ -42,8 +38,10 @@ export default function Dashboard() {
     <div className="space-y-5">
       {summary.error && <ErrorBanner message={summary.error} onRetry={summary.reload} />}
 
-      {/* ------------------------------ Statistik ------------------------------ */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      {/* ------ Kiri: 3 kartu statistik + grafik | Kanan: ringkasan + stok menipis ------ */}
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+        <div className="flex flex-col gap-5 lg:col-span-2">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <StatCard
           label="Omzet hari ini"
           value={s ? rupiah(s.today.omzet) : '-'}
@@ -79,20 +77,11 @@ export default function Dashboard() {
           tone="violet"
           loading={summary.loading}
         />
-        <StatCard
-          label="Piutang belum lunas"
-          value={s ? rupiahShort(s.receivables.total) : '-'}
-          hint={s ? `${s.receivables.count} transaksi bon` : undefined}
-          icon="wallet"
-          tone="red"
-          loading={summary.loading}
-        />
-      </div>
+          </div>
 
-      <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
         {/* ------------------------------ Grafik ------------------------------ */}
         <Card
-          className="xl:col-span-2"
+          className="flex-1"
           title="Omzet & laba 30 hari terakhir"
           subtitle={
             isOwner
@@ -115,9 +104,10 @@ export default function Dashboard() {
             <AreaChart data={chartData} height={210} />
           )}
         </Card>
+        </div>
 
-        {/* ------------------------------ Ringkasan ------------------------------ */}
-        <div className="space-y-5">
+        {/* ------- Kolom kanan: Ringkasan + Stok menipis (tinggi sejajar grafik) ------- */}
+        <div className="flex flex-col gap-5">
           <Card title="Ringkasan bulan ini">
             {summary.loading ? (
               <LoadingBlock />
@@ -140,6 +130,7 @@ export default function Dashboard() {
           </Card>
 
           <Card
+            className="flex-1"
             title="Stok menipis"
             action={
               <Link to="/sparepart">
@@ -177,63 +168,6 @@ export default function Dashboard() {
           </Card>
         </div>
       </div>
-
-      {/* ------------------------------ Transaksi terakhir ------------------------------ */}
-      <Card
-        title="Transaksi terakhir"
-        subtitle="8 transaksi paling baru"
-        action={
-          <Link to="/riwayat">
-            <Button size="xs" variant="outline">
-              Semua riwayat
-            </Button>
-          </Link>
-        }
-        padded={false}
-      >
-        {summary.loading ? (
-          <LoadingBlock />
-        ) : !s || s.recentTransactions.length === 0 ? (
-          <p className="px-4 py-10 text-center text-sm text-slate-400">
-            Belum ada transaksi.{' '}
-            <Link to="/kasir" className="text-brand-600 hover:underline">
-              Buat transaksi pertama
-            </Link>
-          </p>
-        ) : (
-          <TableWrap>
-            <thead>
-              <tr>
-                <Th>Kode</Th>
-                <Th>Waktu</Th>
-                <Th>Pelanggan</Th>
-                <Th>Pembayaran</Th>
-                <Th align="right">Total</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {s.recentTransactions.map((t) => (
-                <tr key={t.id} className="hover:bg-slate-50">
-                  <Td className="font-mono text-xs">{t.code}</Td>
-                  <Td className="whitespace-nowrap text-xs text-slate-500">{relativeDay(t.date)}</Td>
-                  <Td>
-                    <span className="font-medium text-slate-800">{t.customerName}</span>
-                    <span className="ml-1.5 text-xs text-slate-400">({t.itemCount} item)</span>
-                  </Td>
-                  <Td>
-                    <Badge tone={t.paymentMethod === 'credit' ? 'amber' : 'slate'}>
-                      {PAYMENT_LABELS[t.paymentMethod as keyof typeof PAYMENT_LABELS] || t.paymentMethod}
-                    </Badge>
-                  </Td>
-                  <Td align="right" className="font-medium tabular">
-                    {rupiah(t.total)}
-                  </Td>
-                </tr>
-              ))}
-            </tbody>
-          </TableWrap>
-        )}
-      </Card>
 
       {s && isOwner && (
         <p className="text-center text-xs text-slate-400">
