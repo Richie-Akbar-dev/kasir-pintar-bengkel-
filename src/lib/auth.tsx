@@ -20,7 +20,7 @@ interface AuthState {
   saveSettingsLocally: (settings: Settings) => void;
 }
 
-const DEFAULT_SETTINGS: Settings = {
+export const DEFAULT_SETTINGS: Settings = {
   workshopName: 'Bengkel Pintar',
   tagline: '',
   address: '',

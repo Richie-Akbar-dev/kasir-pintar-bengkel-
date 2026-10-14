@@ -286,9 +286,9 @@ export default function Kasir() {
   /* ---------------------------------- Render ---------------------------------- */
   return (
     <div className="pb-10">
-      <div className="grid grid-cols-1 gap-5 xl:grid-cols-5">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-5">
         {/* ============================ KATALOG ============================ */}
-        <div className="space-y-4 xl:col-span-3">
+        <div className="space-y-4 lg:col-span-3">
           <Card padded={false}>
             <div className="space-y-3 p-4">
               <div className="flex flex-wrap items-center gap-2">
@@ -424,8 +424,8 @@ export default function Kasir() {
         </div>
 
         {/* ============================ KERANJANG ============================ */}
-        <div className="xl:col-span-2">
-          <div className="space-y-4 xl:sticky xl:top-20">
+        <div className="lg:col-span-2">
+          <div className="space-y-4 lg:sticky lg:top-20">
             {/* Pelanggan — nama & plat diketik manual */}
             <Card padded={false}>
               <div className="space-y-3 px-4 py-3">

@@ -1,4 +1,5 @@
 import { Fragment, useRef } from 'react';
+import { renderToString } from 'react-dom/server';
 import type { Settings, Transaction } from '@/lib/types';
 import { PAYMENT_LABELS } from '@/lib/types';
 import { rupiah, formatDateTime } from '@/lib/format';
@@ -143,6 +144,45 @@ export function ReceiptBody({
       )}
     </div>
   );
+}
+
+/**
+ * Cetak struk langsung ke dialog printer peramban (mode non-thermal).
+ * Tidak menampilkan modal pratinjau — dialog printer muncul langsung.
+ */
+export function printReceipt(trx: Transaction, settings: Settings | null): void {
+  const html = renderToString(<ReceiptBody trx={trx} settings={settings} />);
+  const iframe = document.createElement('iframe');
+  iframe.setAttribute('aria-hidden', 'true');
+  iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;opacity:0;';
+  document.body.appendChild(iframe);
+  const doc = iframe.contentDocument;
+  if (!doc) return;
+  doc.open();
+  doc.write(`<!doctype html><html><head><meta charset="utf-8"><title>Struk ${trx.code}</title>
+<style>
+  @page { margin: 0; }
+  body { margin: 0; background: #fff; }
+  .receipt { font-family: 'Consolas','Courier New',ui-monospace,monospace; color: #000; background: #fff; }
+  .receipt-58 { width: 58mm; padding: 2mm; font-size: 10.5px; line-height: 1.35; }
+  .receipt-80 { width: 80mm; padding: 3mm; font-size: 12px; line-height: 1.4; }
+  .receipt hr { border: none; border-top: 1px dashed #000; margin: 3px 0; }
+  .receipt table { width: 100%; border-collapse: collapse; }
+  .receipt .row { display: flex; justify-content: space-between; gap: 6px; }
+  [class~="text-center"] { text-align: center; }
+  [class~="font-bold"] { font-weight: bold; }
+  [class~="uppercase"] { text-transform: uppercase; }
+  [class~="text-[1.15em]"] { font-size: 1.15em; }
+  [class~="text-[0.9em]"] { font-size: 0.9em; }
+  [class~="mt-0.5"] { margin-top: 2px; }
+</style></head><body>${html}</body></html>`);
+  doc.close();
+  const win = iframe.contentWindow;
+  if (win) {
+    win.focus();
+    win.print();
+  }
+  setTimeout(() => iframe.remove(), 1500);
 }
 
 /** Modal struk dengan tombol cetak. */

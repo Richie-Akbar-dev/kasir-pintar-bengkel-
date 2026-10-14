@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '@/lib/api';
-import { useAuth } from '@/lib/auth';
+import { useAuth, DEFAULT_SETTINGS } from '@/lib/auth';
 import { useApi } from '@/lib/useApi';
 import { rupiah } from '@/lib/format';
 import {
@@ -21,8 +21,8 @@ import {
   Textarea,
   useToast,
 } from '@/components/ui';
-import ReceiptModal from '@/components/Receipt';
 import { isDirectPrint, printTransaction } from '@/lib/hardware';
+import { printReceipt } from '@/components/Receipt';
 import { KASIR_CART_KEY, type KasirCartSave } from './Kasir';
 
 const PAYMENTS: PaymentMethod[] = ['cash', 'transfer', 'qris', 'debit', 'credit'];
@@ -40,7 +40,6 @@ export default function Pembayaran() {
   const [note, setNote] = useState('');
   const [defaultMechanic, setDefaultMechanic] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [lastTrx, setLastTrx] = useState<Transaction | null>(null);
 
   const mechanics = useApi<{ data: Mechanic[] }>('/api/mechanics');
   const directPrint = isDirectPrint(settings);
@@ -107,35 +106,43 @@ export default function Pembayaran() {
         note,
         workOrderId: data.workOrderId,
       });
-      toast.push(`Transaksi ${res.data.code} tersimpan`);
+      toast.push(`Transaksi ${res.data.code} tersimpan`, 'info');
 
-      if (directPrint) {
-        try {
+      /* Cetak struk TANPA pratinjau — statusnya di pop-up kanan atas */
+      toast.push(
+        directPrint
+          ? 'Mencetak struk ke printer thermal…'
+          : 'Proses cetak struk dimulai…',
+        'info'
+      );
+      try {
+        if (directPrint) {
           const out = await printTransaction(res.data.id);
           toast.push(
-            out.drawerOpened ? 'Struk tercetak & laci uang terbuka.' : 'Struk terkirim ke printer.'
+            out.drawerOpened
+              ? 'Struk tercetak · laci uang terbuka.'
+              : 'Struk tercetak di printer thermal.'
           );
-        } catch (err) {
-          toast.push(
-            err instanceof Error ? err.message : 'Gagal mencetak ke printer. Cetak ulang dari Riwayat.',
-            'error'
-          );
+        } else {
+          // Beri jeda singkat agar pop-up status sempat tampil sebelum dialog cetak
+          await new Promise((r) => setTimeout(r, 350));
+          printReceipt(res.data, settings || DEFAULT_SETTINGS);
+          toast.push('Struk dikirim ke printer.');
         }
+      } catch (err) {
+        toast.push(
+          err instanceof Error ? err.message : 'Gagal mencetak struk. Cetak ulang dari menu Riwayat.',
+          'error'
+        );
       }
 
-      setLastTrx(res.data);
+      // Bersihkan & kembali ke Kasir — status cetak tetap terlihat di pop-up kanan atas
+      sessionStorage.removeItem(KASIR_CART_KEY);
+      navigate('/kasir');
     } catch (err) {
       toast.push(err instanceof Error ? err.message : 'Gagal menyimpan transaksi.', 'error');
-    } finally {
       setSubmitting(false);
     }
-  }
-
-  /** Setelah struk ditutup: bersihkan & kembali ke Kasir. */
-  function finish() {
-    sessionStorage.removeItem(KASIR_CART_KEY);
-    setLastTrx(null);
-    navigate('/kasir');
   }
 
   if (!data) return null;
@@ -150,8 +157,28 @@ export default function Pembayaran() {
       </div>
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
-        {/* ===================== Rincian belanja ===================== */}
+        {/* ============ Kolom kiri: Pelanggan di atas, Rincian di bawah ============ */}
         <div className="space-y-5 lg:col-span-2">
+          <Card title="Pelanggan">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <Field label="Nama pelanggan">
+                <Input value={data.customerName || 'Pelanggan Umum'} readOnly className="h-10 bg-slate-50 text-[13px]" />
+              </Field>
+              <Field label="Plat nomor">
+                <Input
+                  value={data.plateNumber || '—'}
+                  readOnly
+                  className="h-10 bg-slate-50 text-[13px]"
+                />
+              </Field>
+            </div>
+            {data.workOrderId && (
+              <p className="mt-2 text-[11px] text-slate-500">
+                Pembayaran untuk work order yang sedang berjalan.
+              </p>
+            )}
+          </Card>
+
           <Card title="Rincian belanja" padded={false}>
             <ul className="divide-y divide-slate-100">
               {items.map((item) => (
@@ -172,26 +199,13 @@ export default function Pembayaran() {
                 </li>
               ))}
             </ul>
-          </Card>
-
-          <Card title="Pelanggan">
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <Field label="Nama pelanggan">
-                <Input value={data.customerName || 'Pelanggan Umum'} readOnly className="h-10 bg-slate-50 text-[13px]" />
-              </Field>
-              <Field label="Plat nomor">
-                <Input
-                  value={data.plateNumber || '—'}
-                  readOnly
-                  className="h-10 bg-slate-50 text-[13px]"
-                />
-              </Field>
+            {/* Total yang perlu dibayar */}
+            <div className="flex items-center justify-between border-t-2 border-slate-200 bg-slate-50 px-4 py-3">
+              <span className="text-[13px] font-semibold text-slate-700">
+                Total yang perlu dibayar
+              </span>
+              <span className="text-xl font-bold tabular text-brand-700">{rupiah(total)}</span>
             </div>
-            {data.workOrderId && (
-              <p className="mt-2 text-[11px] text-slate-500">
-                Pembayaran untuk work order yang sedang berjalan.
-              </p>
-            )}
           </Card>
         </div>
 
@@ -349,15 +363,6 @@ export default function Pembayaran() {
           </Card>
         </div>
       </div>
-
-      {/* Struk kecil sebagai pop-up setelah pembayaran */}
-      <ReceiptModal
-        trx={lastTrx}
-        settings={settings}
-        autoPrint={!directPrint}
-        onClose={finish}
-        onDone={finish}
-      />
     </div>
   );
 }

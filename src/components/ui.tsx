@@ -565,11 +565,11 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={value}>
       {children}
-      <div className="pointer-events-none fixed bottom-4 right-4 z-[60] flex w-full max-w-sm flex-col gap-2 print:hidden">
+      <div className="pointer-events-none fixed right-4 top-4 z-[60] flex w-full max-w-sm flex-col gap-2 print:hidden">
         {items.map((t) => (
           <div
             key={t.id}
-            className={`animate-slide-up pointer-events-auto flex items-start gap-2.5 rounded-lg px-3.5 py-3 text-sm shadow-lg ring-1 ${
+            className={`animate-fade-in pointer-events-auto flex items-start gap-2.5 rounded-lg px-3.5 py-3 text-sm shadow-lg ring-1 ${
               t.tone === 'success'
                 ? 'bg-emerald-600 text-white ring-emerald-700'
                 : t.tone === 'error'
